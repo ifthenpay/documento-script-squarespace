@@ -1,0 +1,89 @@
+<script>
+  (function () {
+    const CHECKOUT_BUTTON_SELECTOR = ".cart-checkout-button";
+    const REMOVE_BUTTON_SELECTOR = ".cart-row-remove";
+    const CART_ROW_SELECTOR = ".cart-row"; // Para detectar se há itens no carrinho
+  
+    const overrideButton = (btn) => {
+      if (btn.dataset.modified) return;
+      btn.dataset.modified = "true";
+  
+      const newBtn = btn.cloneNode(true);
+      btn.replaceWith(newBtn);
+  
+      newBtn.addEventListener("click", async function (e) {  // Tornar a função assíncrona
+        e.preventDefault();
+        e.stopImmediatePropagation();
+  
+        const cartItems = document.querySelectorAll(CART_ROW_SELECTOR);
+        if (cartItems.length === 0) {
+          // Carrinho já está vazio — redireciona direto
+          window.location.href = "/";
+          return;
+        }
+  
+        const data = getCartDetailsFromDOM(); // Dados do carrinho
+        data.cart = JSON.stringify(data.cart);
+        data.minimumOrderSubtotal = JSON.stringify(data.minimumOrderSubtotal);
+        data.token = '8bb3130aec7444da8e93361abc19baa66b53b948';
+		// data.storeUrl = window.location.origin;
+
+		const queryString = new URLSearchParams(data).toString();
+        console.log(`https://free-caiman-funny.ngrok-free.app/ifthenpay-squarespace?${queryString}`);
+        window.open(`https://free-caiman-funny.ngrok-free.app/ifthenpay-squarespace?${queryString}`, '_blank');
+        
+        // Caso contrário, remove itens um a um
+        const removeButtons = document.querySelectorAll(REMOVE_BUTTON_SELECTOR);
+        if (removeButtons.length === 0) {
+          window.location.href = "/";
+          return;
+        }
+  
+        let i = 0;
+        const clickNext = () => {
+          if (i < removeButtons.length) {
+            removeButtons[i].click();
+            i++;
+            setTimeout(clickNext, 300);
+          } else {
+            setTimeout(() => {
+              window.location.href = "/";
+            }, 1000);
+          }
+        };
+  
+        clickNext();
+      });
+    };
+  
+    const observer = new MutationObserver(() => {
+      const btn = document.querySelector(CHECKOUT_BUTTON_SELECTOR);
+      if (btn) {
+        overrideButton(btn);
+      }
+    });
+  
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  
+    const btnImmediate = document.querySelector(CHECKOUT_BUTTON_SELECTOR);
+    if (btnImmediate) {
+      overrideButton(btnImmediate);
+    }
+  })();
+
+  function getCartDetailsFromDOM() {
+    const cart = document.getElementById("sqs-cart-root");
+    const scriptTag = cart.querySelector("script[type='application/json']");
+
+    if (scriptTag) {
+      const jsonData = JSON.parse(scriptTag.textContent);
+      console.log(jsonData);
+      return jsonData;
+    }
+    console.error("Script JSON não encontrado dentro da div.");
+    return {};
+  }
+</script>

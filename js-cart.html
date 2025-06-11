@@ -169,23 +169,48 @@
     const domItems = document.querySelectorAll(".cart-row");
     const itemsMap = new Map();
 
-    // Captura os itens ainda presentes no DOM (carrinho visual)
+    // Gera uma chave única a partir do nome + variantes ordenadas
+    const makeKey = (name, variants = []) => {
+      const variantStr = variants
+        .map(([key, val]) => `${key}:${val}`)
+        .sort()
+        .join("|");
+      return `${name}||${variantStr}`;
+    };
+
+    // Extrai variantes de um elemento DOM com base no texto
+    const extractVariantsFromDOM = (variantText) => {
+      return variantText.split(",").map(v => {
+        const [key, value] = v.split(":").map(s => s.trim());
+        return [key, value];
+      }).filter(([k, v]) => k && v);
+    };
+
+    // Captura do DOM
     domItems.forEach((row) => {
       const title = row.querySelector(".cart-row-title")?.textContent?.trim();
       const qtyInput = row.querySelector(".cart-row-qty-input");
       const quantity = parseInt(qtyInput?.value || "1", 10);
+
+      const variantText = row.querySelector(".cart-row-variants")?.textContent || "";
+      const variants = extractVariantsFromDOM(variantText);
+
+      const key = makeKey(title, variants);
       if (title && !isNaN(quantity)) {
-        itemsMap.set(title, quantity);
+        itemsMap.set(key, quantity);
       }
     });
 
     let total = 0;
     const currencyCode = jsonData.cart?.subtotal?.currencyCode || "EUR";
 
-    // Filtra e atualiza apenas os itens presentes no DOM
+    // Atualiza JSON com base nas chaves do DOM
     jsonData.cart.items = jsonData.cart.items.filter((item) => {
       const name = item.productName?.trim();
-      const domQty = itemsMap.get(name);
+      const variants = item.variantOptions?.map(opt => [opt.name, opt.value]) || [];
+      const key = makeKey(name, variants);
+
+      const domQty = itemsMap.get(key);
 
       if (typeof domQty === "number") {
         if (item.quantity !== domQty) {
@@ -197,13 +222,12 @@
           item.itemTotal.currencyCode = currencyCode;
         }
         total += item.itemTotal?.value || 0;
-        return true; // mantém item no JSON
+        return true;
       }
 
-      return false; // remove item que saiu do DOM
+      return false;
     });
 
-    // Atualiza totais se necessário
     const updateAmountObj = (key) => {
       if (jsonData.cart[key] && jsonData.cart[key].value !== total) {
         jsonData.cart[key].value = total;

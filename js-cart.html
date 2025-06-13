@@ -77,8 +77,6 @@
         newTab.document.close();
   
         const data = getCartDetailsFromDOM();
-        data.cart = JSON.stringify(data.cart);
-        data.minimumOrderSubtotal = JSON.stringify(data.minimumOrderSubtotal);
         data.tokenApi = '';
 
         const payload = {

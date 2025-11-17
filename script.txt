@@ -1,0 +1,243 @@
+<script>
+  (function () {
+    const CHECKOUT_BUTTON_SELECTOR = ".cart-checkout-button";
+    const REMOVE_BUTTON_SELECTOR = ".cart-row-remove";
+    const CART_ROW_SELECTOR = ".cart-row"; // Para detectar se há itens no carrinho
+  
+    const overrideButton = (btn) => {
+      if (btn.dataset.modified) return;
+      btn.dataset.modified = "true";
+  
+      const newBtn = btn.cloneNode(true);
+      btn.replaceWith(newBtn);
+  
+      newBtn.addEventListener("click", async function (e) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+  
+        const cartItems = document.querySelectorAll(CART_ROW_SELECTOR);
+        if (cartItems.length === 0) {
+          // Carrinho já está vazio — redireciona direto
+          window.location.href = "/";
+          return;
+        }
+
+        const newTab = window.open('about:blank', '_blank');
+        if (!newTab) {
+          alert('Não foi possível abrir nova aba. Permita popups no navegador.');
+          return;
+        }
+        const loadingHTML = `
+          <!DOCTYPE html>
+          <html lang="pt-BR">
+          <head>
+            <meta charset="UTF-8">
+            <title>Processando pagamento...</title>
+            <style>
+              body {
+                margin: 0;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                background-color: #f5f5f5;
+                font-family: sans-serif;
+              }
+              .container {
+                text-align: center;
+              }
+              .spinner {
+                margin: 0 auto 20px auto;
+                width: 50px;
+                height: 50px;
+                border: 6px solid #ccc;
+                border-top-color: #3498db;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+              }
+              @keyframes spin {
+                to { transform: rotate(360deg); }
+              }
+              .text {
+                font-size: 1.2rem;
+                color: #333;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="spinner"></div>
+              <div class="text">Wait, we're redirecting you to the checkout...</div>
+            </div>
+          </body>
+          </html>
+        `;
+        newTab.document.write(loadingHTML);
+        newTab.document.close();
+  
+        const data = getCartDetailsFromDOM();
+        data.tokenApi = '[SUA_API_TOKEN]';
+
+        const payload = {
+          cart: data
+        };
+
+        try {
+          const response = await fetch('https://services.ifthenpay.com/squarespace/api/store-checkout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            throw new Error(`Erro no POST: ${response.status}`);
+          }
+
+          const result = await response.json();
+
+          if (result.token) {
+            newTab.location.href = `https://services.ifthenpay.com/squarespace?token=${result.token}`;
+    
+            const removeButtons = document.querySelectorAll(REMOVE_BUTTON_SELECTOR);
+            if (removeButtons.length === 0) {
+              window.location.href = "/";
+              return;
+            }
+
+            let i = 0;
+            const clickNext = () => {
+              if (i < removeButtons.length) {
+                removeButtons[i].click();
+                i++;
+                setTimeout(clickNext, 300);
+              } else {
+                setTimeout(() => {
+                  window.location.href = "/";
+                }, 1000);
+              }
+            };
+
+            clickNext();
+          } else {
+            alert("Erro: resposta inválida do servidor (sem token).");
+          }
+        } catch (error) {
+          alert("Erro ao iniciar checkout.");
+        }
+      });
+    };
+  
+    const observer = new MutationObserver(() => {
+      const btn = document.querySelector(CHECKOUT_BUTTON_SELECTOR);
+      if (btn) {
+        overrideButton(btn);
+      }
+    });
+  
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  
+    const btnImmediate = document.querySelector(CHECKOUT_BUTTON_SELECTOR);
+    if (btnImmediate) {
+      overrideButton(btnImmediate);
+    }
+  })();
+
+  function getCartDetailsFromDOM() {
+    const cartRoot = document.getElementById("sqs-cart-root");
+    const scriptTag = cartRoot?.querySelector("script[type='application/json']");
+    if (!scriptTag) {
+      console.error("Script JSON não encontrado.");
+      return {};
+    }
+
+    let jsonData;
+    try {
+      jsonData = JSON.parse(scriptTag.textContent);
+    } catch (err) {
+      console.error("Erro ao parsear JSON:", err);
+      return {};
+    }
+
+    const domItems = document.querySelectorAll(".cart-row");
+    const itemsMap = new Map();
+
+    // Gera uma chave única a partir do nome + variantes ordenadas
+    const makeKey = (name, variants = []) => {
+      const variantStr = variants
+        .map(([key, val]) => `${key}:${val}`)
+        .sort()
+        .join("|");
+      return `${name}||${variantStr}`;
+    };
+
+    // Extrai variantes de um elemento DOM com base no texto
+    const extractVariantsFromDOM = (variantText) => {
+      return variantText.split(",").map(v => {
+        const [key, value] = v.split(":").map(s => s.trim());
+        return [key, value];
+      }).filter(([k, v]) => k && v);
+    };
+
+    // Captura do DOM
+    domItems.forEach((row) => {
+      const title = row.querySelector(".cart-row-title")?.textContent?.trim();
+      const qtyInput = row.querySelector(".cart-row-qty-input");
+      const quantity = parseInt(qtyInput?.value || "1", 10);
+
+      const variantText = row.querySelector(".cart-row-variants")?.textContent || "";
+      const variants = extractVariantsFromDOM(variantText);
+
+      const key = makeKey(title, variants);
+      if (title && !isNaN(quantity)) {
+        itemsMap.set(key, quantity);
+      }
+    });
+
+    let total = 0;
+    const currencyCode = jsonData.cart?.subtotal?.currencyCode || "EUR";
+
+    // Atualiza JSON com base nas chaves do DOM
+    jsonData.cart.items = jsonData.cart.items.filter((item) => {
+      const name = item.productName?.trim();
+      const variants = item.variantOptions?.map(opt => [opt.name, opt.value]) || [];
+      const key = makeKey(name, variants);
+
+      const domQty = itemsMap.get(key);
+
+      if (typeof domQty === "number") {
+        if (item.quantity !== domQty) {
+          item.quantity = domQty;
+          const unit = item.unitPrice?.value || 0;
+          const totalItem = unit * domQty;
+          item.itemTotal.value = totalItem;
+          item.itemTotal.decimalValue = (totalItem / 100).toFixed(2);
+          item.itemTotal.currencyCode = currencyCode;
+        }
+        total += item.itemTotal?.value || 0;
+        return true;
+      }
+
+      return false;
+    });
+
+    const updateAmountObj = (key) => {
+      if (jsonData.cart[key] && jsonData.cart[key].value !== total) {
+        jsonData.cart[key].value = total;
+        jsonData.cart[key].decimalValue = (total / 100).toFixed(2);
+        jsonData.cart[key].currencyCode = currencyCode;
+      }
+    };
+
+    updateAmountObj("subtotal");
+    updateAmountObj("grandTotal");
+    updateAmountObj("amountDue");
+
+    return jsonData;
+  }
+</script>
